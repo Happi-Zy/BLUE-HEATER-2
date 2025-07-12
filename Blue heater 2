@@ -1,0 +1,218 @@
+-- ⬇️ IMPORT FLUENT UI & CONFIG
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "KapaoHub",
+    SubTitle = "Auto Farm & Utility",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = false,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    AutoFarm = Window:AddTab({ Title = "Auto Farm", Icon = "target" }),
+    Dungeon = Window:AddTab({ Title = "Dungeon", Icon = "skull" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+local Options = Fluent.Options
+
+-- ⬇️ GLOBAL SERVICES & VARS
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local HRP = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+HRP = HRP:WaitForChild("HumanoidRootPart")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Event = ReplicatedStorage.PlayerEvents.EntityHit
+local Spawns = workspace:FindFirstChild("SpawnedEntities") or Instance.new("Folder",workspace)
+Spawns.Name = "SpawnedEntities"
+local NPCs = workspace:FindFirstChild("NPCs") or Instance.new("Folder",workspace)
+NPCs.Name = "NPCs"
+
+-- SETTINGS
+local safeHeight, radius = -11, 50
+local selectedMob, selectedNPC, selectedDungeon = nil, nil, nil
+local noclipEnabled = false
+local autoEnterDungeon, autoPlayAgain, autoClearDungeon = false, false, false
+
+-- ⬇️ FUNCTIONS
+RunService.Stepped:Connect(function()
+    if noclipEnabled then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
+local function getAllMobs()
+    local mobs = {}
+    local global = workspace:FindFirstChild("SpawnedEntities")
+    local dungeon = workspace:FindFirstChild("EntitySpawns")
+    if global then for _,m in ipairs(global:GetChildren()) do table.insert(mobs,m) end end
+    if dungeon then for _,m in ipairs(dungeon:GetChildren()) do table.insert(mobs,m) end end
+    return mobs
+end
+
+-- THREAD HANDLES
+local killAuraThread, autoFarmThread, autoChestThread, autoChestHopThread, autoClearThread = nil, nil, nil, nil, nil
+
+local function startKillAura()
+    killAuraThread = RunService.Heartbeat:Connect(function()
+        for _, mob in ipairs(getAllMobs()) do
+            if mob:FindFirstChild("HumanoidRootPart") then
+                local dist = (HRP.Position - mob.HumanoidRootPart.Position).Magnitude
+                if dist <= radius then Event:FireServer(mob) end
+            end
+        end
+    end)
+end
+
+local function startAutoFarm()
+    autoFarmThread = RunService.Heartbeat:Connect(function()
+        local nearest, minDist = nil, math.huge
+        for _, mob in ipairs(getAllMobs()) do
+            if selectedMob and mob.Name == selectedMob and mob:FindFirstChild("HumanoidRootPart") then
+                local dist = (HRP.Position - mob.HumanoidRootPart.Position).Magnitude
+                if dist < minDist then nearest, minDist = mob, dist end
+            end
+        end
+        if nearest then
+            local pos = nearest.HumanoidRootPart.Position
+            HRP.Velocity = Vector3.new(0,0,0)
+            HRP.CFrame = CFrame.new(pos.X, pos.Y + safeHeight, pos.Z)
+        end
+    end)
+end
+
+local function startAutoClearDungeon()
+    autoClearThread = RunService.Heartbeat:Connect(function()
+        local nearest, minDist = nil, math.huge
+        for _, mob in ipairs(getAllMobs()) do
+            if mob:FindFirstChild("HumanoidRootPart") then
+                local dist = (HRP.Position - mob.HumanoidRootPart.Position).Magnitude
+                if dist < minDist then nearest, minDist = mob, dist end
+            end
+        end
+        if nearest then
+            local pos = nearest.HumanoidRootPart.Position
+            HRP.Velocity = Vector3.new(0,0,0)
+            HRP.CFrame = CFrame.new(pos.X, pos.Y + safeHeight, pos.Z)
+        end
+        for _, mob in ipairs(getAllMobs()) do
+            if mob:FindFirstChild("HumanoidRootPart") then
+                local dist = (HRP.Position - mob.HumanoidRootPart.Position).Magnitude
+                if dist <= radius then Event:FireServer(mob) end
+            end
+        end
+    end)
+end
+
+local function startAutoChest()
+    autoChestThread = task.spawn(function()
+        while true do
+            for _, chest in ipairs(workspace:GetDescendants()) do
+                if chest.Name == "Chest" then
+                    local prompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    local hitbox = chest:FindFirstChild("Hitbox") or chest:FindFirstChildWhichIsA("BasePart")
+                    if prompt and hitbox then
+                        HRP.CFrame = hitbox.CFrame + Vector3.new(0,3,0)
+                        task.wait(0.2) prompt:InputHoldBegin()
+                        task.wait(0.5) prompt:InputHoldEnd()
+                    end
+                end
+            end
+            task.wait(1)
+        end
+    end)
+end
+
+local function startAutoChestHop()
+    autoChestHopThread = task.spawn(function()
+        while true do
+            local found = false
+            for _, chest in ipairs(workspace:GetDescendants()) do
+                if chest.Name == "Chest" then
+                    found = true
+                    local prompt = chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    local hitbox = chest:FindFirstChild("Hitbox") or chest:FindFirstChildWhichIsA("BasePart")
+                    if prompt and hitbox then
+                        HRP.CFrame = hitbox.CFrame + Vector3.new(0,3,0)
+                        task.wait(0.2) prompt:InputHoldBegin()
+                        task.wait(0.5) prompt:InputHoldEnd()
+                    end
+                end
+            end
+            if not found then task.wait(1) game:GetService("TeleportService"):Teleport(game.PlaceId) end
+            task.wait(1)
+        end
+    end)
+end
+
+-- AUTO FARM UI
+Tabs.AutoFarm:AddDropdown("SelectMob",{Title="Select Mob",Values={},Multi=false}):OnChanged(function(v) selectedMob = v end)
+Tabs.AutoFarm:AddToggle("KillAura",{Title="Kill Aura"}):OnChanged(function(v) if v then startKillAura() else if killAuraThread then killAuraThread:Disconnect() killAuraThread = nil end end end)
+Tabs.AutoFarm:AddToggle("AutoFarm",{Title="Auto Farm Mob (Hover)"}):OnChanged(function(v) if v then startAutoFarm() else if autoFarmThread then autoFarmThread:Disconnect() autoFarmThread = nil end end end)
+Tabs.AutoFarm:AddToggle("Noclip",{Title="Noclip"}):OnChanged(function(v) noclipEnabled = v end)
+Tabs.AutoFarm:AddDropdown("SelectNPC",{Title="Select NPC",Values={},Multi=false}):OnChanged(function(v) selectedNPC = v end)
+Tabs.AutoFarm:AddButton({Title="Teleport to Selected NPC",Callback=function() 
+    if selectedNPC then local npc = NPCs:FindFirstChild(selectedNPC)
+        if npc and npc:FindFirstChild("HumanoidRootPart") then HRP.CFrame = npc.HumanoidRootPart.CFrame + Vector3.new(0,3,0) end
+    end
+end})
+Tabs.AutoFarm:AddButton({Title="Refresh Mobs & NPCs",Callback=function()
+    local mobs,npcs={},{} for _,m in ipairs(getAllMobs()) do if not table.find(mobs,m.Name) then table.insert(mobs,m.Name) end end
+    for _,n in ipairs(NPCs:GetChildren()) do if not table.find(npcs,n.Name) then table.insert(npcs,n.Name) end end
+    Options.SelectMob:SetValues(mobs) Options.SelectNPC:SetValues(npcs)
+    Fluent:Notify({Title="KapaoHub",Content="Refreshed Mob & NPC lists.",Duration=4})
+end})
+Tabs.AutoFarm:AddToggle("AutoChest",{Title="Auto Chest"}):OnChanged(function(v) if v then startAutoChest() else if autoChestThread then task.cancel(autoChestThread) autoChestThread=nil end end end)
+Tabs.AutoFarm:AddToggle("AutoChestHop",{Title="Auto Chest + Server Hop"}):OnChanged(function(v) if v then startAutoChestHop() else if autoChestHopThread then task.cancel(autoChestHopThread) autoChestHopThread=nil end end end)
+Tabs.AutoFarm:AddSlider("Height",{Title="Hover Height",Default=-11,Min=-100,Max=100,Rounding=0,Callback=function(v) safeHeight=v end})
+Tabs.AutoFarm:AddSlider("Radius",{Title="Kill Aura Radius",Default=50,Min=10,Max=200,Rounding=0,Callback=function(v) radius=v end})
+
+-- DUNGEON UI
+Tabs.Dungeon:AddDropdown("SelectDungeon",{Title="Select Dungeon",Values={"Cellar Dungeon","Enchanted Forest Dungeon","Mines Dungeon","Temple Ruins Dungeon"},Multi=false})
+:OnChanged(function(v) selectedDungeon=v end)
+Tabs.Dungeon:AddToggle("AutoEnterDungeon",{Title="Auto Enter Dungeon"}):OnChanged(function(v) autoEnterDungeon=v end)
+Tabs.Dungeon:AddToggle("AutoPlayAgain",{Title="Auto Play Again"}):OnChanged(function(v) autoPlayAgain=v end)
+Tabs.Dungeon:AddToggle("AutoClearDungeon",{Title="Auto Clear Dungeon"}):OnChanged(function(v) if v then startAutoClearDungeon() else if autoClearThread then autoClearThread:Disconnect() autoClearThread=nil end end end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if autoEnterDungeon and selectedDungeon then
+            local dungeon = workspace.Map:FindFirstChild(selectedDungeon)
+            if dungeon then
+                HRP.CFrame = dungeon:GetPivot()+Vector3.new(0,3,0)
+                task.wait(2)
+                local btn=LocalPlayer.PlayerGui.MainGui.StartingDungeonFrame.Container.DungeonRewardsFrame.Bottombar.EnterBtnFrame
+                if btn then local b=btn:FindFirstChildOfClass("TextButton")
+                    if b then for _,c in ipairs(getconnections(b.MouseButton1Click)) do c:Fire() end end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(2.5) do
+        if autoPlayAgain then
+            local btn = LocalPlayer.PlayerGui.MainGui.InstanceCompleteFrame.Container.Bottombar.PlayAgainBtnFrame
+            if btn then local b=btn:FindFirstChildOfClass("TextButton")
+                if b then for _,c in ipairs(getconnections(b.MouseButton1Click)) do c:Fire() end end
+            end
+        end
+    end
+end)
+
+-- SAVE
+SaveManager:SetLibrary(Fluent) InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings() SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("KapaoHub") SaveManager:SetFolder("KapaoHub/Game")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings) SaveManager:BuildConfigSection(Tabs.Settings)
+Window:SelectTab(1)
+Fluent:Notify({Title="KapaoHub Loaded",Content="Full Hub Ready",Duration=6})
+SaveManager:LoadAutoloadConfig()
