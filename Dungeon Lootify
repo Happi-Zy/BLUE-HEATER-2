@@ -374,23 +374,7 @@ local function attackTarget(weaponName, targetCF)
     -- ส่ง Bc (เดิม)
     pcall(function()
         TNet:FireServer(
-            'Bb',
-            attackCounter,
-            workspace:GetServerTimeNow(),
-            1,
-            tostring(weaponName),
-            {
-                hitNum = attackCounter % 4,
-                onHitAnimName = tostring(weaponName) .. '1',
-                hrtCF = targetCF,
-            }
-        )
-    end)
-    
-    -- เพิ่ม Bf
-    pcall(function()
-        TNet:FireServer(
-            'Bf',
+            'Bd',
             attackCounter,
             workspace:GetServerTimeNow(),
             1,
@@ -404,14 +388,16 @@ local function attackTarget(weaponName, targetCF)
     end)
 end
 
+
+
     local currentTargetIndex = 1
     local lastEnemyRefresh = 0
     
     -- Separate refresh loop for enemies
     spawn(function()
         while self.Enabled do
-            wait(1.0) -- เพิ่มจาก 0.5 เป็น 1.0 วินาที
-            -- This will constantly refresh enemy list every 1.0 seconds
+            wait(0.5)
+            -- This will constantly refresh enemy list every 0.5 seconds
             if self.Enabled then
                 self.currentEnemies = getActiveEnemies()
             end
@@ -420,135 +406,129 @@ end
     
     self.currentEnemies = getActiveEnemies() -- Initial scan
 
-    -- Main attack loop with 0.1 second delay
-    self.MainLoop = task.spawn(function()
-        while self.Enabled do
-            pcall(function()
-                local me = HRP()
-                if not me then return end
+    self.MainLoop = RunService.Heartbeat:Connect(function()
+        if not self.Enabled then return end
+        
+        local me = HRP()
+        if not me then return end
 
-                -- Get config values with defaults if nil
-                local MAX_TARGETS = tonumber(getgenv().KapaoConfig.KillAura_MaxTargets) or 3
-                local LIMIT_RANGE = tonumber(getgenv().KapaoConfig.KillAura_Range) or 1500
-                local MODE = getgenv().KapaoConfig.KillAura_Mode or 'both'
-                local PREDICTIVE_AIM = getgenv().KapaoConfig.KillAura_PredictiveAim
-                local PREDICTION_TIME = tonumber(getgenv().KapaoConfig.KillAura_PredictionTime) or 0.12
+        -- Get config values with defaults if nil
+        local MAX_TARGETS = tonumber(getgenv().KapaoConfig.KillAura_MaxTargets) or 3
+        local LIMIT_RANGE = tonumber(getgenv().KapaoConfig.KillAura_Range) or 1500
+        local MODE = getgenv().KapaoConfig.KillAura_Mode or 'both'
+        local PREDICTIVE_AIM = getgenv().KapaoConfig.KillAura_PredictiveAim
+        local PREDICTION_TIME = tonumber(getgenv().KapaoConfig.KillAura_PredictionTime) or 0.12
 
-                -- Always use fresh enemy list
-                local now = tick()
-                
-                -- Force refresh every 0.5 seconds as backup
-                if now - lastEnemyRefresh > 0.5 then
-                    self.currentEnemies = getActiveEnemies()
-                    lastEnemyRefresh = now
-                end
+        -- Always use fresh enemy list
+        local now = tick()
+        
+        -- Force refresh every 0.5 seconds as backup
+        if now - lastEnemyRefresh > 0.5 then
+            self.currentEnemies = getActiveEnemies()
+            lastEnemyRefresh = now
+        end
 
-                local cand = {}
-                for _, enemyModel in ipairs(self.currentEnemies or {}) do
-                    if isAlive(enemyModel) then
-                        local eHRP = findMobHRP(enemyModel)
-                        if eHRP then
-                            local dist = (me.Position - eHRP.Position).Magnitude
-                            if (not LIMIT_RANGE) or (dist <= LIMIT_RANGE) then
-                                table.insert(cand, { hrp = eHRP, dist = dist, model = enemyModel })
-                            end
-                        end
+        local cand = {}
+        for _, enemyModel in ipairs(self.currentEnemies or {}) do
+            if isAlive(enemyModel) then
+                local eHRP = findMobHRP(enemyModel)
+                if eHRP then
+                    local dist = (me.Position - eHRP.Position).Magnitude
+                    if (not LIMIT_RANGE) or (dist <= LIMIT_RANGE) then
+                        table.insert(cand, { hrp = eHRP, dist = dist, model = enemyModel })
                     end
                 end
+            end
+        end
 
-                if #cand == 0 then 
-                    -- Immediately refresh if no enemies found
-                    self.currentEnemies = getActiveEnemies()
-                    return 
-                end
+        if #cand == 0 then 
+            -- Immediately refresh if no enemies found
+            self.currentEnemies = getActiveEnemies()
+            return 
+        end
 
-                local deltaTime = now - lastUpdateTime
-                lastUpdateTime = now
-                
-                -- Update enemy velocity data
-                local currentEnemiesInList = {}
-                for _, enemyInfo in ipairs(cand) do
-                    local enemyModel = enemyInfo.model
-                    currentEnemiesInList[enemyModel] = true
-                    local eHRP = enemyInfo.hrp
-                    
-                    if not enemyData[enemyModel] then
-                        enemyData[enemyModel] = { lastPos = eHRP.Position, velocity = Vector3.new() }
-                    else
-                        if deltaTime > 0.001 then
-                            local velocity = (eHRP.Position - enemyData[enemyModel].lastPos) / deltaTime
-                            enemyData[enemyModel].velocity = enemyData[enemyModel].velocity:Lerp(velocity, 0.5)
-                        end
-                        enemyData[enemyModel].lastPos = eHRP.Position
-                    end
-                end
-
-                -- Clean up old enemy data
-                for enemyModelInCache, _ in pairs(enemyData) do
-                    if not currentEnemiesInList[enemyModelInCache] then
-                        enemyData[enemyModelInCache] = nil
-                    end
-                end
-
-                -- Sort by distance
-                table.sort(cand, function(a, b) return a.dist < b.dist end)
-                
-                -- Select targets (with nil check)
-                local targetsToHit = {}
-                local maxTargetsToHit = MAX_TARGETS or 3 -- Default to 3 if nil
-                for i = 1, math.min(#cand, maxTargetsToHit) do
-                    table.insert(targetsToHit, {hrp = cand[i].hrp, model = cand[i].model})
-                end
-                
-                if #targetsToHit == 0 then return end
-                
-                -- Cycle through targets
-                if currentTargetIndex > #targetsToHit then
-                    currentTargetIndex = 1
-                end
-
-                local targetInfo = targetsToHit[currentTargetIndex]
-                if targetInfo and isAlive(targetInfo.model) then
-                    local targetHRP = targetInfo.hrp
-                    local targetModel = targetInfo.model
-                    
-                    local targetCF = targetHRP.CFrame
-                    
-                    -- Predictive aiming
-                    if PREDICTIVE_AIM and enemyData[targetModel] then
-                        local velocity = enemyData[targetModel].velocity
-                        if velocity.Magnitude > 1 then
-                            local predictedPos = targetHRP.Position + (velocity * PREDICTION_TIME)
-                            targetCF = CFrame.new(predictedPos) * (targetHRP.CFrame - targetHRP.Position)
-                        end
-                    end
-
-                    -- Weapon selection
-                    local weaponToUse = DEFAULT_WEAPON_AUTO
-                    if MODE == 'auto' then
-                        local detectedWeapon = LP.Character and LP.Character:FindFirstChildWhichIsA('Tool')
-                        if detectedWeapon then weaponToUse = detectedWeapon.Name end
-                    elseif MODE:match('^force:(.+)$') then
-                        weaponToUse = MODE:match('^force:(.+)$')
-                    end
-
-                    -- Attack execution
-                    if MODE == 'both' then
-                        for weaponName, _ in pairs(ATTACK_PROFILES) do
-                            attackTarget(weaponName, targetCF)
-                        end
-                    else
-                        attackTarget(weaponToUse, targetCF)
-                    end
-                    
-                    currentTargetIndex = currentTargetIndex + 1
-                else
-                    currentTargetIndex = 1
-                end
-            end)
+        local deltaTime = now - lastUpdateTime
+        lastUpdateTime = now
+        
+        -- Update enemy velocity data
+        local currentEnemiesInList = {}
+        for _, enemyInfo in ipairs(cand) do
+            local enemyModel = enemyInfo.model
+            currentEnemiesInList[enemyModel] = true
+            local eHRP = enemyInfo.hrp
             
-            -- Wait 0.1 seconds before next attack cycle
-            task.wait(0.1)
+            if not enemyData[enemyModel] then
+                enemyData[enemyModel] = { lastPos = eHRP.Position, velocity = Vector3.new() }
+            else
+                if deltaTime > 0.001 then
+                    local velocity = (eHRP.Position - enemyData[enemyModel].lastPos) / deltaTime
+                    enemyData[enemyModel].velocity = enemyData[enemyModel].velocity:Lerp(velocity, 0.5)
+                end
+                enemyData[enemyModel].lastPos = eHRP.Position
+            end
+        end
+
+        -- Clean up old enemy data
+        for enemyModelInCache, _ in pairs(enemyData) do
+            if not currentEnemiesInList[enemyModelInCache] then
+                enemyData[enemyModelInCache] = nil
+            end
+        end
+
+        -- Sort by distance
+        table.sort(cand, function(a, b) return a.dist < b.dist end)
+        
+        -- Select targets (with nil check)
+        local targetsToHit = {}
+        local maxTargetsToHit = MAX_TARGETS or 3 -- Default to 3 if nil
+        for i = 1, math.min(#cand, maxTargetsToHit) do
+            table.insert(targetsToHit, {hrp = cand[i].hrp, model = cand[i].model})
+        end
+        
+        if #targetsToHit == 0 then return end
+        
+        -- Cycle through targets
+        if currentTargetIndex > #targetsToHit then
+            currentTargetIndex = 1
+        end
+
+        local targetInfo = targetsToHit[currentTargetIndex]
+        if targetInfo and isAlive(targetInfo.model) then
+            local targetHRP = targetInfo.hrp
+            local targetModel = targetInfo.model
+            
+            local targetCF = targetHRP.CFrame
+            
+            -- Predictive aiming
+            if PREDICTIVE_AIM and enemyData[targetModel] then
+                local velocity = enemyData[targetModel].velocity
+                if velocity.Magnitude > 1 then
+                    local predictedPos = targetHRP.Position + (velocity * PREDICTION_TIME)
+                    targetCF = CFrame.new(predictedPos) * (targetHRP.CFrame - targetHRP.Position)
+                end
+            end
+
+            -- Weapon selection
+            local weaponToUse = DEFAULT_WEAPON_AUTO
+            if MODE == 'auto' then
+                local detectedWeapon = LP.Character and LP.Character:FindFirstChildWhichIsA('Tool')
+                if detectedWeapon then weaponToUse = detectedWeapon.Name end
+            elseif MODE:match('^force:(.+)$') then
+                weaponToUse = MODE:match('^force:(.+)$')
+            end
+
+            -- Attack execution
+            if MODE == 'both' then
+                for weaponName, _ in pairs(ATTACK_PROFILES) do
+                    attackTarget(weaponName, targetCF)
+                end
+            else
+                attackTarget(weaponToUse, targetCF)
+            end
+            
+            currentTargetIndex = currentTargetIndex + 1
+        else
+            currentTargetIndex = 1
         end
     end)
     
@@ -564,8 +544,8 @@ end
 
 function KillAuraSystem:Stop()
     self.Enabled = false
-    if self.MainLoop then
-        pcall(function() task.cancel(self.MainLoop) end)
+    if self.MainLoop and self.MainLoop.Connected then
+        self.MainLoop:Disconnect()
         self.MainLoop = nil
     end
     if self.RoomChangeConnection then
@@ -1489,6 +1469,296 @@ do
         end
     end)
 
+    local AutoHealToggle = Tabs.Misc:AddToggle("AutoHealEnabled", {
+        Title = "💊 Inf Auto Heal",
+        Description = "Add & use potions",
+        Default = false
+    })
+
+    -- Lightweight Auto Heal system
+    local AutoHealSystem = { Enabled = false, addJob = nil, useJob = nil }
+
+    function AutoHealSystem:Start()
+        if self.Enabled then return end
+        if not isAutoHealAllowed() then
+            return
+        end
+        self.Enabled = true
+        getgenv().KapaoConfig.AutoHeal_Enabled = true
+        local rs = game:GetService('ReplicatedStorage')
+        local tnet = waitFor(function()
+            return rs:FindFirstChild('TNetSent')
+        end, 15)
+        if not tnet then
+            self.Enabled = false
+            getgenv().KapaoConfig.AutoHeal_Enabled = false
+            return
+        end
+        self.addJob = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    tnet:FireServer('y', 28, { { id = 1110001, num = 2 } })
+                end)
+                task.wait(0.5)
+            end
+        end)
+        self.useJob = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    tnet:FireServer('0', 17)  -- Changed back to 'o' for AutoHeal
+                end)
+                task.wait(0.5)
+            end
+        end)
+    end
+
+    function AutoHealSystem:Stop()
+        self.Enabled = false
+        getgenv().KapaoConfig.AutoHeal_Enabled = false
+        if self.addJob then pcall(function() task.cancel(self.addJob) end) self.addJob = nil end
+        if self.useJob then pcall(function() task.cancel(self.useJob) end) self.useJob = nil end
+    end
+
+
+
+    -- Dupe Weapons System (Updated Version)
+    local DupeWeaponsToggle = Tabs.Misc:AddToggle("DupeWeaponsEnabled", {
+        Title = "⚔️ Dupe Weapons",
+        Description = "Duplicate weapons infinitely",
+        Default = false
+    })
+
+    local DupeWeaponsSystem = { 
+        Enabled = false, 
+        addPotionLoop = nil, 
+        usePotionLoop1 = nil,
+        usePotionLoop2 = nil,
+        usePotionLoop3 = nil
+    }
+
+    -- Updated Dupe Functions
+    local function addPotion(TNetSent, isDuping)
+        if not isDuping then return end
+        TNetSent:FireServer("y", 28, { { id = 1150005, num = 2 } })
+    end
+
+    local function usePotion0(TNetSent, isDuping)
+        if not isDuping then return end
+        TNetSent:FireServer("0", 17)
+    end
+
+    local function usePotionP(TNetSent, isDuping)
+        if not isDuping then return end
+        TNetSent:FireServer("p", 17)
+    end
+
+    local function usePotionO(TNetSent, isDuping)
+        if not isDuping then return end
+        TNetSent:FireServer("o", 17)
+    end
+
+        local function usePotionO(TNetSent, isDuping)
+        if not isDuping then return end
+        TNetSent:FireServer("z", 17)
+    end
+
+    function DupeWeaponsSystem:Start()
+        if self.Enabled then return end
+        -- Dupe weapons works everywhere, no placeid restriction
+        self.Enabled = true
+        getgenv().KapaoConfig.DupeWeapons_Enabled = true
+
+        local rs = game:GetService('ReplicatedStorage')
+        local tnet = waitFor(function()
+            return rs:FindFirstChild('TNetSent')
+        end, 15)
+        if not tnet then
+            self.Enabled = false
+            getgenv().KapaoConfig.DupeWeapons_Enabled = false
+            return
+        end
+
+        -- Add potion loop (every 1 second)
+        self.addPotionLoop = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    addPotion(tnet, self.Enabled)
+                end)
+                task.wait(1)
+            end
+        end)
+
+        -- Use potion "0" loop (every 0.3 seconds)
+        self.usePotionLoop1 = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    usePotion0(tnet, self.Enabled)
+                end)
+                task.wait(0.3)
+            end
+        end)
+
+        -- Use potion "p" loop (every 0.4 seconds)
+        self.usePotionLoop2 = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    usePotionP(tnet, self.Enabled)
+                end)
+                task.wait(0.4)
+            end
+        end)
+
+        -- Use potion "o" loop (every 0.5 seconds)
+        self.usePotionLoop3 = task.spawn(function()
+            while self.Enabled do
+                pcall(function()
+                    usePotionO(tnet, self.Enabled)
+                end)
+                task.wait(0.5)
+            end
+        end)
+    end
+
+    function DupeWeaponsSystem:Stop()
+        self.Enabled = false
+        getgenv().KapaoConfig.DupeWeapons_Enabled = false
+        if self.addPotionLoop then pcall(function() task.cancel(self.addPotionLoop) end) self.addPotionLoop = nil end
+        if self.usePotionLoop1 then pcall(function() task.cancel(self.usePotionLoop1) end) self.usePotionLoop1 = nil end
+        if self.usePotionLoop2 then pcall(function() task.cancel(self.usePotionLoop2) end) self.usePotionLoop2 = nil end
+        if self.usePotionLoop3 then pcall(function() task.cancel(self.usePotionLoop3) end) self.usePotionLoop3 = nil end
+    end
+
+
+    Tabs.Misc:AddParagraph({
+        Title = "⚠️ Dupe Weapons Warning",
+        Content = "After duping, click 'Equip Best' in inventory every time"
+    })
+
+    -- Auto Sell Dupe Items System
+    local AutoSellToggle = Tabs.Misc:AddToggle("AutoSellEnabled", {
+        Title = "💰 Auto Sell Dupe",
+        Description = "Sell 1 dupe item to let Script work",
+        Default = false
+    })
+
+    -- Auto Sell System Variables
+    local running = false
+    local currentItemId = 0
+    local autoSellEnabled = false
+    local Event = nil
+
+    -- ฟังก์ชันยิง Event ขายของ (เวอร์ชันอัปเดต)
+    local function fireBurst()
+        if currentItemId == 0 or not autoSellEnabled or not Event then
+            return
+        end
+
+        pcall(function()
+            for i = 1, 10 do
+                Event:FireServer(
+                    "B0",
+                    math.random(30, 200),
+                    {
+                        currentItemId, -- ชิ้นที่ 1
+                        currentItemId  -- ชิ้นที่ 2
+                    }
+                )
+            end
+        end)
+    end
+
+    -- Loop หลักในการขายของ
+    local function sellingLoop()
+        while running and autoSellEnabled do
+            fireBurst()
+            task.wait(0.5) -- หยุดรอ 0.5 วินาที ก่อนเริ่มยิงชุดใหม่
+        end
+    end
+
+    -- Auto Sell Hook (only when enabled)
+    local autoSellHookActive = false
+    local originalNamecall
+
+    local function setupAutoSellHook()
+        if autoSellHookActive then return end
+        
+        -- หา Event ก่อน
+        local rs = game:GetService('ReplicatedStorage')
+        Event = rs:WaitForChild('TNetSent', 10)
+        if not Event then 
+            return 
+        end
+        
+        autoSellHookActive = true
+
+        local mt = getrawmetatable(game)
+        originalNamecall = mt.__namecall
+        setreadonly(mt, false)
+
+        mt.__namecall = function(self, ...)
+            local args = {...}
+            local method = getnamecallmethod()
+
+            -- Only hook when auto sell is enabled
+            if autoSellEnabled and method == "FireServer" and self == Event then
+                -- ตรวจสอบว่าเป็น Event ขายของ ("B0")
+                if args[1] == "B0" and type(args[3]) == "table" then
+                    local foundId
+                    for _, value in pairs(args[3]) do
+                        if type(value) == "number" then
+                            foundId = value
+                            break
+                        end
+                    end
+                    
+                    -- ถ้าเจอ ID ใหม่ที่ไม่เคยจำไว้
+                    if foundId and currentItemId ~= foundId then
+                        currentItemId = foundId
+                        
+                        -- เริ่ม loop อัตโนมัติถ้ายังไม่ทำงาน
+                        if not running then
+                            running = true
+                            task.spawn(sellingLoop) -- เริ่ม loop การทำงาน
+                        end
+                    end
+                end
+            end
+
+            return originalNamecall(self, ...)
+        end
+
+        setreadonly(mt, true)
+    end
+
+    local function removeAutoSellHook()
+        if not autoSellHookActive then return end
+        autoSellHookActive = false
+
+        if originalNamecall then
+            local mt = getrawmetatable(game)
+            setreadonly(mt, false)
+            mt.__namecall = originalNamecall
+            setreadonly(mt, true)
+        end
+    end
+
+    AutoSellToggle:OnChanged(function()
+        if Options.AutoSellEnabled.Value then
+            getgenv().KapaoConfig.AutoSell_Enabled = true
+            autoSellEnabled = true
+            setupAutoSellHook()
+            if currentItemId ~= 0 then
+                running = true
+                task.spawn(sellingLoop)
+            end
+        else
+            getgenv().KapaoConfig.AutoSell_Enabled = false
+            autoSellEnabled = false
+            running = false
+            removeAutoSellHook()
+        end
+    end)
+
     -- Fix Stuck Loading System
     local FixStuckLoadingSystem = {
         Enabled = false,
@@ -1547,6 +1817,28 @@ do
         end
     })
 
+
+    AutoHealToggle:OnChanged(function()
+        if Options.AutoHealEnabled.Value then
+            if not isAutoHealAllowed() then
+                getgenv().KapaoConfig.AutoHeal_Enabled = false
+                AutoHealSystem:Stop()
+                return
+            end
+            AutoHealSystem:Start()
+        else
+            AutoHealSystem:Stop()
+        end
+    end)
+
+    DupeWeaponsToggle:OnChanged(function()
+        if Options.DupeWeaponsEnabled.Value then
+            -- Dupe Weapons works everywhere, no placeid restriction needed
+            DupeWeaponsSystem:Start()
+        else
+            DupeWeaponsSystem:Stop()
+        end
+    end)
 end
 
 -- Settings Tab Integration
