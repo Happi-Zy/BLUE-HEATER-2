@@ -23,8 +23,12 @@ local enemyIndex = 1
 -- Auto Buy Variables
 local autoBuyCrates = false
 local autoBuyBlocks = false
-local selectedCrate = "WoodenCrate"
-local selectedBlock = "Spikes"
+local selectedCrates = {}
+local selectedBlocks = {}
+local buyDelay = 1
+
+-- Event Variables
+local autoSubmitLunar = false
 
 -- Create Window
 local Window = Fluent:CreateWindow({
@@ -39,6 +43,8 @@ local Window = Fluent:CreateWindow({
 
 local Tab = Window:AddTab({ Title = "Main", Icon = "file-json-2" })
 local ShopTab = Window:AddTab({ Title = "Auto Buy", Icon = "banknote" })
+local EventTab = Window:AddTab({ Title = "Events", Icon = "calendar" })
+local SettingsTab = Window:AddTab({ Title = "Settings", Icon = "settings" })
 
 -- Find Plot
 local function findPlot()
@@ -114,37 +120,51 @@ local function getNearestEnemy()
 end
 
 -- Auto Buy Functions
-local function buyCrate()
+local function buyCrate(crateName)
     pcall(function()
         local args = {
             "Crates",
-            selectedCrate
+            crateName
         }
         ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Functions"):WaitForChild("BuyStock"):InvokeServer(unpack(args))
     end)
 end
 
-local function buyBlock()
+local function buyBlock(blockName)
     pcall(function()
         local args = {
             "Blocks",
-            selectedBlock
+            blockName
         }
         ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Functions"):WaitForChild("BuyStock"):InvokeServer(unpack(args))
     end)
 end
 
--- Main Tab Toggles
+-- Submit Lunar Points
+local function submitLunarPoints()
+    pcall(function()
+        local args = {"LunarEclipse"}
+        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Functions"):WaitForChild("ProgressEventSubmit"):InvokeServer(unpack(args))
+    end)
+end
+
+-- Main Tab Section
+Tab:AddSection("Combat")
+
 Tab:AddToggle("KillAura", {
     Title = "Kill Aura",
+    Description = "Auto swing weapon",
     Default = false,
     Callback = function(value)
         killaura = value
     end
 })
 
+Tab:AddSection("Farming")
+
 Tab:AddToggle("AutoFarm", {
     Title = "Auto Farm",
+    Description = "Teleport to enemies",
     Default = false,
     Callback = function(value)
         farming = value
@@ -169,45 +189,122 @@ Tab:AddToggle("LockOn", {
     end
 })
 
--- Shop Tab - Auto Buy Crates
-ShopTab:AddDropdown("CrateSelect", {
-    Title = "Select Crate",
+-- Shop Tab - Multi Crates
+ShopTab:AddSection("Crates")
+
+local CrateMultiDropdown = ShopTab:AddDropdown("CrateMultiSelect", {
+    Title = "Select Crates",
+    Description = "Choose multiple crates to auto buy",
     Values = {"WoodenCrate", "IronCrate", "GoldCrate", "ElectroCrate"},
-    Multi = false,
-    Default = 1,
-    Callback = function(Value)
-        selectedCrate = Value
-    end
+    Multi = true,
+    Default = {"WoodenCrate"},
 })
+
+CrateMultiDropdown:OnChanged(function(Value)
+    selectedCrates = {}
+    for crateName, isSelected in pairs(Value) do
+        if isSelected then
+            table.insert(selectedCrates, crateName)
+        end
+    end
+end)
 
 ShopTab:AddToggle("AutoBuyCrates", {
     Title = "Auto Buy Crates",
+    Description = "Automatically purchase selected crates",
     Default = false,
     Callback = function(value)
         autoBuyCrates = value
     end
 })
 
--- Shop Tab - Auto Buy Blocks
-ShopTab:AddDropdown("BlockSelect", {
-    Title = "Select Block",
-    Values = {"Spikes", "StoneSpikes", "MetalSpikes", "DoubleTurret", "Flamethrower", "MinigunTurret"},
-    Multi = false,
-    Default = 1,
-    Callback = function(Value)
-        selectedBlock = Value
-    end
+-- Shop Tab - Multi Blocks
+ShopTab:AddSection("Blocks")
+
+local BlockMultiDropdown = ShopTab:AddDropdown("BlockMultiSelect", {
+    Title = "Select Blocks",
+    Description = "Choose multiple blocks to auto buy",
+    Values = {"Crossbow","Turret","Spikes", "StoneSpikes", "MetalSpikes", "DoubleTurret", "Flamethrower", "MinigunTurret"},
+    Multi = true,
+    Default = {"Crossbow"},
 })
+
+BlockMultiDropdown:OnChanged(function(Value)
+    selectedBlocks = {}
+    for blockName, isSelected in pairs(Value) do
+        if isSelected then
+            table.insert(selectedBlocks, blockName)
+        end
+    end
+end)
 
 ShopTab:AddToggle("AutoBuyBlocks", {
     Title = "Auto Buy Blocks",
+    Description = "Automatically purchase selected blocks",
     Default = false,
     Callback = function(value)
         autoBuyBlocks = value
     end
 })
 
--- Kill Aura
+-- Event Tab
+EventTab:AddSection("Lunar Eclipse")
+
+EventTab:AddToggle("AutoSubmitLunar", {
+    Title = "Auto Submit Lunar Points",
+    Description = "Automatically submit lunar points",
+    Default = false,
+    Callback = function(value)
+        autoSubmitLunar = value
+        if value then
+            Fluent:Notify({
+                Title = "Lunar Auto Submit",
+                Content = "Submitting lunar points",
+                Duration = 2
+            })
+        end
+    end
+})
+
+EventTab:AddButton({
+    Title = "Submit Lunar Points Once",
+    Description = "Manually submit lunar points",
+    Callback = function()
+        submitLunarPoints()
+        Fluent:Notify({
+            Title = "Lunar Points",
+            Content = "Submitted!",
+            Duration = 2
+        })
+    end
+})
+
+-- Settings Tab
+SettingsTab:AddSection("Auto Buy Settings")
+
+local BuyDelaySlider = SettingsTab:AddSlider("BuyDelay", {
+    Title = "Buy Delay",
+    Description = "Delay between purchases (seconds)",
+    Default = 1,
+    Min = 0.5,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(Value)
+        buyDelay = Value
+    end
+})
+
+SettingsTab:AddSection("GUI Settings")
+
+SettingsTab:AddButton({
+    Title = "Rejoin Server",
+    Description = "Rejoin the current server",
+    Callback = function()
+        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    end
+})
+
+-- Kill Aura Loop
 spawn(function()
     while task.wait(0.05) do
         if killaura then
@@ -220,23 +317,38 @@ end)
 
 -- Auto Buy Crates Loop
 spawn(function()
-    while task.wait(1) do -- Wait 1 second between purchases
-        if autoBuyCrates then
-            buyCrate()
+    while task.wait(buyDelay) do
+        if autoBuyCrates and #selectedCrates > 0 then
+            for _, crateName in ipairs(selectedCrates) do
+                buyCrate(crateName)
+                task.wait(0.1) -- Small delay between different items
+            end
         end
     end
 end)
 
 -- Auto Buy Blocks Loop
 spawn(function()
-    while task.wait(1) do -- Wait 1 second between purchases
-        if autoBuyBlocks then
-            buyBlock()
+    while task.wait(buyDelay) do
+        if autoBuyBlocks and #selectedBlocks > 0 then
+            for _, blockName in ipairs(selectedBlocks) do
+                buyBlock(blockName)
+                task.wait(0.1) -- Small delay between different items
+            end
         end
     end
 end)
 
--- Auto Farm
+-- Auto Submit Lunar Points Loop
+spawn(function()
+    while task.wait(2) do -- Submit every 2 seconds
+        if autoSubmitLunar then
+            submitLunarPoints()
+        end
+    end
+end)
+
+-- Auto Farm Loop
 spawn(function()
     while task.wait() do
         if farming and enemiesFolder then
@@ -257,7 +369,7 @@ spawn(function()
                     end
                     
                     if currentTarget then
-                        hrp.CFrame = currentTarget.HumanoidRootPart.CFrame
+                        hrp.CFrame = currentTarget.HumanoidRootPart.CFrame * CFrame.new(0, 0, 2)
                     end
                 else
                     -- Loop: Cycle through enemies
@@ -270,7 +382,7 @@ spawn(function()
                         
                         local enemy = enemies[enemyIndex]
                         if enemy then
-                            hrp.CFrame = enemy.HumanoidRootPart.CFrame
+                            hrp.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 0, 2)
                             enemyIndex = enemyIndex + 1
                         end
                     else
@@ -305,9 +417,8 @@ player.Idled:Connect(function()
 end)
 
 -- Setup
-task.wait()
+task.wait(1)
 setupPlot()
 
 -- Select Main Tab when script loads
-task.wait() -- Small delay to ensure GUI is fully loaded
 Window:SelectTab(1)
