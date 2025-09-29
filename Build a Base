@@ -1,0 +1,313 @@
+-- Load Libraries
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Player
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+-- Variables
+local myPlot = nil
+local enemiesFolder = nil
+local farming = false
+local killaura = false
+local lockOnMode = false
+local currentTarget = nil
+local enemyIndex = 1
+
+-- Auto Buy Variables
+local autoBuyCrates = false
+local autoBuyBlocks = false
+local selectedCrate = "WoodenCrate"
+local selectedBlock = "Spikes"
+
+-- Create Window
+local Window = Fluent:CreateWindow({
+    Title = "Build A Base",
+    SubTitle = "by Kapao",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tab = Window:AddTab({ Title = "Main", Icon = "file-json-2" })
+local ShopTab = Window:AddTab({ Title = "Auto Buy", Icon = "banknote" })
+
+-- Find Plot
+local function findPlot()
+    local Plots = workspace:WaitForChild("Plots")
+    for _, plot in pairs(Plots:GetChildren()) do
+        local owner = plot:GetAttribute("Owner_UserID") or plot:GetAttribute("Owner_UserId")
+        if owner and tostring(owner) == tostring(player.UserId) then
+            return plot
+        end
+    end
+    return nil
+end
+
+-- Setup Plot
+local function setupPlot()
+    myPlot = findPlot()
+    if not myPlot then
+        Fluent:Notify({
+            Title = "Error",
+            Content = "No plot found!",
+            Duration = 3
+        })
+        return false
+    end
+    
+    enemiesFolder = myPlot:WaitForChild("Enemies") -- Will wait infinitely
+    
+    Fluent:Notify({
+        Title = "Success",
+        Content = "Plot: " .. myPlot.Name,
+        Duration = 3
+    })
+    return true
+end
+
+-- Check if enemy is valid
+local function isValidEnemy(enemy)
+    return enemy and enemy.Parent and enemy:FindFirstChild("HumanoidRootPart") 
+    and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0
+end
+
+-- Get all enemies
+local function getEnemies()
+    if not enemiesFolder then return {} end
+    
+    local enemies = {}
+    for _, enemy in pairs(enemiesFolder:GetChildren()) do
+        if isValidEnemy(enemy) then
+            table.insert(enemies, enemy)
+        end
+    end
+    return enemies
+end
+
+-- Get nearest enemy
+local function getNearestEnemy()
+    if not enemiesFolder or not hrp then return nil end
+    
+    local nearest = nil
+    local shortestDistance = math.huge
+    
+    for _, enemy in pairs(enemiesFolder:GetChildren()) do
+        if isValidEnemy(enemy) then
+            local distance = (enemy.HumanoidRootPart.Position - hrp.Position).Magnitude
+            if distance < shortestDistance then
+                nearest = enemy
+                shortestDistance = distance
+            end
+        end
+    end
+    
+    return nearest
+end
+
+-- Auto Buy Functions
+local function buyCrate()
+    pcall(function()
+        local args = {
+            "Crates",
+            selectedCrate
+        }
+        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Functions"):WaitForChild("BuyStock"):InvokeServer(unpack(args))
+    end)
+end
+
+local function buyBlock()
+    pcall(function()
+        local args = {
+            "Blocks",
+            selectedBlock
+        }
+        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Functions"):WaitForChild("BuyStock"):InvokeServer(unpack(args))
+    end)
+end
+
+-- Main Tab Toggles
+Tab:AddToggle("KillAura", {
+    Title = "Kill Aura",
+    Default = false,
+    Callback = function(value)
+        killaura = value
+    end
+})
+
+Tab:AddToggle("AutoFarm", {
+    Title = "Auto Farm",
+    Default = false,
+    Callback = function(value)
+        farming = value
+        if farming then
+            -- Always refresh when turning on
+            character = player.Character
+            if character then
+                hrp = character:WaitForChild("HumanoidRootPart")
+            end
+            setupPlot()
+        end
+    end
+})
+
+Tab:AddToggle("LockOn", {
+    Title = "Lock-On Mode",
+    Description = "Stay on one enemy until dead",
+    Default = false,
+    Callback = function(value)
+        lockOnMode = value
+        currentTarget = nil
+    end
+})
+
+-- Shop Tab - Auto Buy Crates
+ShopTab:AddDropdown("CrateSelect", {
+    Title = "Select Crate",
+    Values = {"WoodenCrate", "IronCrate", "GoldCrate", "ElectroCrate"},
+    Multi = false,
+    Default = 1,
+    Callback = function(Value)
+        selectedCrate = Value
+    end
+})
+
+ShopTab:AddToggle("AutoBuyCrates", {
+    Title = "Auto Buy Crates",
+    Default = false,
+    Callback = function(value)
+        autoBuyCrates = value
+    end
+})
+
+-- Shop Tab - Auto Buy Blocks
+ShopTab:AddDropdown("BlockSelect", {
+    Title = "Select Block",
+    Values = {"Spikes", "StoneSpikes", "MetalSpikes", "DoubleTurret", "Flamethrower", "MinigunTurret"},
+    Multi = false,
+    Default = 1,
+    Callback = function(Value)
+        selectedBlock = Value
+    end
+})
+
+ShopTab:AddToggle("AutoBuyBlocks", {
+    Title = "Auto Buy Blocks",
+    Default = false,
+    Callback = function(value)
+        autoBuyBlocks = value
+    end
+})
+
+-- Kill Aura
+spawn(function()
+    while task.wait(0.05) do
+        if killaura then
+            pcall(function()
+                ReplicatedStorage.Remotes.Events.ToolState:FireServer(true)
+            end)
+        end
+    end
+end)
+
+-- Auto Buy Crates Loop
+spawn(function()
+    while task.wait(1) do -- Wait 1 second between purchases
+        if autoBuyCrates then
+            buyCrate()
+        end
+    end
+end)
+
+-- Auto Buy Blocks Loop
+spawn(function()
+    while task.wait(1) do -- Wait 1 second between purchases
+        if autoBuyBlocks then
+            buyBlock()
+        end
+    end
+end)
+
+-- Auto Farm
+spawn(function()
+    while task.wait() do
+        if farming and enemiesFolder then
+            pcall(function()
+                -- Check character
+                if not character or not character.Parent then
+                    character = player.Character
+                    if character then
+                        hrp = character:WaitForChild("HumanoidRootPart")
+                    end
+                    return
+                end
+                
+                if lockOnMode then
+                    -- Lock-On: Stay on one enemy
+                    if not isValidEnemy(currentTarget) then
+                        currentTarget = getNearestEnemy()
+                    end
+                    
+                    if currentTarget then
+                        hrp.CFrame = currentTarget.HumanoidRootPart.CFrame
+                    end
+                else
+                    -- Loop: Cycle through enemies
+                    local enemies = getEnemies()
+                    
+                    if #enemies > 0 then
+                        if enemyIndex > #enemies then
+                            enemyIndex = 1
+                        end
+                        
+                        local enemy = enemies[enemyIndex]
+                        if enemy then
+                            hrp.CFrame = enemy.HumanoidRootPart.CFrame
+                            enemyIndex = enemyIndex + 1
+                        end
+                    else
+                        -- No enemies, reset index
+                        enemyIndex = 1
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Handle Respawn
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    hrp = character:WaitForChild("HumanoidRootPart")
+    currentTarget = nil
+    enemyIndex = 1
+    
+    task.wait(2)
+    if farming then
+        setupPlot()
+    end
+end)
+
+-- Anti-AFK
+local vu = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
+
+-- Setup
+task.wait()
+setupPlot()
+
+-- Select Main Tab when script loads
+task.wait() -- Small delay to ensure GUI is fully loaded
+Window:SelectTab(1)
