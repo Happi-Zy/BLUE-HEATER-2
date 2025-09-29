@@ -386,8 +386,23 @@ local function attackTarget(weaponName, targetCF)
             }
         )
     end)
-end
 
+    -- ส่ง Bc (เดิม)
+    pcall(function()
+        TNet:FireServer(
+            'Bg',
+            attackCounter,
+            workspace:GetServerTimeNow(),
+            1,
+            tostring(weaponName),
+            {
+                hitNum = attackCounter % 4,
+                onHitAnimName = tostring(weaponName) .. '1',
+                hrtCF = targetCF,
+            }
+        )
+    end)
+end
 
 
     local currentTargetIndex = 1
@@ -1656,7 +1671,7 @@ do
         pcall(function()
             for i = 1, 10 do
                 Event:FireServer(
-                    "B0",
+                    "B1",
                     math.random(30, 200),
                     {
                         currentItemId, -- ชิ้นที่ 1
